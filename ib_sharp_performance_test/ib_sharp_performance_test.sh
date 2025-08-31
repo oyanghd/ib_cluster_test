@@ -17,7 +17,7 @@ POWERS=(2 4 8 16 32 64 125)
 OPS=("all_reduce_perf" "all_gather_perf" "reduce_scatter_perf")
 NVLS_AND_SHARP_ENABLE=(0 1)
 
-PROFILE=${PROFILE:-0} # nsys profile
+PROFILE=1 # nsys profile
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 if [ $PROFILE == 1 ]; then PROFILE_WRAPPER="$SCRIPT_DIR/../nsys_profile_rank0.sh";
@@ -37,14 +37,20 @@ for op in "${OPS[@]}"; do
             HOST_ARG=$(printf "%s:1," "${HOSTS[@]}")
             HOST_ARG=${HOST_ARG%,}  # 去掉最后的逗号
 
-            log_profile="${OUT_DIR}/${op}_NVLS_AND_SHARP_ENABLE_${R}_profile0.log"
-            profile_out_file="${op}_NVLS_AND_SHARP_ENABLE_${R}"
+            log_profile="${OUT_DIR}/${op}_NODES_${NUM_NODES}_NVLS_AND_SHARP_ENABLE_${R}_profile0.log"
+            log_profile2="${OUT_DIR}/${op}_NODES_${NUM_NODES}_NVLS_AND_SHARP_ENABLE_${R}_profile1.log"
+            profile_out_file="${op}_NODES_${NUM_NODES}_NVLS_AND_SHARP_ENABLE_${R}"
+
+            MIN_BYTES=$((128 * NUM_NODES))
+            val=$((128 * NUM_NODES))
+            val=$(( val < 4096 ? val : 4096 ))
+            MAX_BYTES="${val}M"
 
             echo "=================================================="
             echo "Running NCCL SHARP test on $NUM_NODES nodes..."
             echo "Hosts: $HOST_ARG"
 
-            mpirun -np $NUM_NODES -host $HOST_ARG \
+            mpirun --allow-run-as-root -np $NUM_NODES -host $HOST_ARG \
                 -bind-to none  -map-by slot \
                 -mca pml ob1 \
                 -mca btl ^openib \
@@ -58,20 +64,16 @@ for op in "${OPS[@]}"; do
                 -x NCCL_DEBUG=WARN \
                 -x NCCL_PLUGIN_P2P=ucx \
                 -x NCCL_SOCKET_IFNAME=eth0 \
-                -x NCCL_COLLNET_ENABLE=1 \
+                -x NCCL_COLLNET_ENABLE=$R \
                 -x NCCL_IB_AR_THRESHOLD=0 \
-                -x PATH=./:$PATH \
-                -x PYTHONPATH=./:$PYTHONPATH \
-                -x MASTER_ADDR=$MASTER_ADDR \
-                -x MASTER_PORT=$MASTER_PORT \
                 -x CUDA_VISIBLE_DEVICES=0 \
                 -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
                 -x NCCL_SHARP_ENABLE=$R \
                 -x NCCL_NVLS_ENABLE=$R \
-                $NCCL_TESTS_PATH/${op} -b 8 -e 16G -f 2 -g 1 -R 0 \
+                $NCCL_TESTS_PATH/${op} -b $MIN_BYTES -e $MAX_BYTES -f 2 -g 1 -R 0 \
                 > $log_profile 2>&1
             
-            mpirun -np $NUM_NODES -host $HOST_ARG \
+            mpirun --allow-run-as-root -np $NUM_NODES -host $HOST_ARG \
                 -bind-to none  -map-by slot \
                 -mca pml ob1 \
                 -mca btl ^openib \
@@ -85,19 +87,15 @@ for op in "${OPS[@]}"; do
                 -x NCCL_DEBUG=WARN \
                 -x NCCL_PLUGIN_P2P=ucx \
                 -x NCCL_SOCKET_IFNAME=eth0 \
-                -x NCCL_COLLNET_ENABLE=1 \
+                -x NCCL_COLLNET_ENABLE=$R \
                 -x NCCL_IB_AR_THRESHOLD=0 \
-                -x PATH=./:$PATH \
-                -x PYTHONPATH=./:$PYTHONPATH \
-                -x MASTER_ADDR=$MASTER_ADDR \
-                -x MASTER_PORT=$MASTER_PORT \
                 -x CUDA_VISIBLE_DEVICES=0 \
                 -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
                 -x NCCL_SHARP_ENABLE=$R \
                 -x NCCL_NVLS_ENABLE=$R \
                 $PROFILE_WRAPPER \
-                -o $profile_out_file \
-                $NCCL_TESTS_PATH/${op} -b 8 -e 16G -f 2 -g 1 -R 0
+                $NCCL_TESTS_PATH/${op} -b $MIN_BYTES -e $MAX_BYTES -f 2 -g 1 -R 0 \
+                > $log_profile2 2>&1
         done
     done
 done

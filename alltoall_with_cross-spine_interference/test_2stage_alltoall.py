@@ -279,23 +279,46 @@ def cleanup():
         torch.distributed.destroy_process_group(cp_group)
         torch.distributed.destroy_process_group()
 
+def measure_bandwidth(func, tensor, **kwargs):
+    torch.cuda.synchronize()
+    start = time.time()
+    output = func(tensor, **kwargs)
+    torch.cuda.synchronize()
+    end = time.time()
+
+    elapsed = end - start
+    num_bytes = tensor.numel() * tensor.element_size()
+    bw = num_bytes / elapsed / 1e9  # GB/s
+    return output, elapsed, bw
 
 if __name__ == "__main__":
-
     init_process()
     init_parallel_group()
     local_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
     torch.cuda.set_device(local_rank)
+
     cp_size = dist.get_world_size()
     group = get_context_parallel_group(cp_size)
     intra_group = get_context_parallel_intra_group(cp_size)
     inter_group = get_context_parallel_inter_group(cp_size)
-    tensor = torch.randn(2, 32768, 64, 128).to("cuda")
+
+    tensor = torch.randn(2, 49152, 192, 128, device="cuda")
+
     for i in range(10):
         print(f"Rank {dist.get_rank()} has data {tensor.shape}")
-        output = all_to_all_4D(tensor, scatter_idx=1, gather_idx=2, group=intra_group, slow_group=inter_group)
-        output_baseline = all_to_all_4D(tensor, scatter_idx=1, gather_idx=2, group=group)
-        print(f"Rank {dist.get_rank()} has data {output.shape}, baseline {output_baseline.shape}")
+        output, t1, bw1 = measure_bandwidth(
+            all_to_all_4D, tensor,
+            scatter_idx=1, gather_idx=2, group=intra_group, slow_group=inter_group
+        )
+        output_baseline, t2, bw2 = measure_bandwidth(
+            all_to_all_4D, tensor,
+            scatter_idx=1, gather_idx=2, group=group
+        )
+        print(
+            f"Rank {dist.get_rank()} alltoall: "
+            f"intra/inter {output.shape}, time {t1:.4f}s, bw {bw1:.2f} GB/s | "
+            f"baseline {output_baseline.shape}, time {t2:.4f}s, bw {bw2:.2f} GB/s"
+        )
         assert output.shape == output_baseline.shape, f"Output shape mismatch: {output.shape} vs {output_baseline.shape}"
         dist.barrier()
         print("")

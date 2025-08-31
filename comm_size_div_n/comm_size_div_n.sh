@@ -3,10 +3,12 @@
 # Usage: bash comm_size_div_n.sh
 
 OPS=("all_reduce_perf" "all_gather_perf" "alltoall_perf" "reduce_scatter_perf")
+# OPS=("all_reduce_perf")
 LOCAL_REGISTERS=(0 1 2)
 
-MIN_BYTES=2
-MAX_BYTES=16G
+# all_gather and reduce_scatter need 256 bytes at least
+MIN_BYTES=512
+MAX_BYTES=8192M
 STEP_FACTOR=2
 
 NCCL_TESTS_PATH=/data/konghaoran/nccl-tests/build
@@ -39,5 +41,7 @@ for op in "${OPS[@]}"; do
         echo "Finished $op with -R $R (with profile)"
         echo "Log saved to $log_profile"
         echo "-----------------------------------"
+
+        sleep 2
     done
 done
